@@ -1,0 +1,3 @@
+pyspark==3.5.4
+numpy==2.2.1
+kaggle==1.6.3

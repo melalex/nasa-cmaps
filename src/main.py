@@ -43,48 +43,12 @@ df_train = df_train.withColumn("RUL", (max("cycle").over(windowSpec) - col("cycl
 
 # Apply KMeans clustering
 feature_cols = ["os1", "os2", "os3"]
+feature_cols.extend(sensor_cols_schema)
 assembler = VectorAssembler(inputCols=feature_cols, outputCol="features")
 df_train = assembler.transform(df_train)
 
-kmeans = KMeans(k=6, seed=42)
-model = kmeans.fit(df_train)
-df_train = model.transform(df_train).withColumnRenamed("prediction", "cluster")
-
-
-# Standardize within clusters
-def standardize_within_cluster(df, features, cluster_col="cluster"):
-    results = []
-    for cluster_id in (
-        df.select(cluster_col).distinct().rdd.flatMap(lambda x: x).collect()
-    ):
-        cluster_data = df.filter(col(cluster_col) == cluster_id)
-        assembler = VectorAssembler(inputCols=features, outputCol="feature_vector")
-        scaler = StandardScaler(inputCol="feature_vector", outputCol="scaled_features")
-        assembled = assembler.transform(cluster_data)
-        scaled_df = scaler.fit(assembled).transform(assembled)
-        results.append(scaled_df.drop("feature_vector"))
-    return reduce(DataFrame.unionAll, results)
-
-
-df_train = standardize_within_cluster(df_train, sensor_cols)
-
-
-# Add rolling stats and lag features
-def add_roll_and_lag_features(df, sensors, window_size=5, lag_steps=5):
-    windowSpec = Window.partitionBy("unit_id").orderBy("cycle")
-    for sensor in sensors:
-        df = df.withColumn(
-            f"{sensor}_mean", avg(sensor).over(windowSpec.rowsBetween(-window_size, 0))
-        )
-        df = df.withColumn(
-            f"{sensor}_std",
-            stddev(sensor).over(windowSpec.rowsBetween(-window_size, 0)),
-        )
-        df = df.withColumn(f"{sensor}_lag", lag(sensor, lag_steps).over(windowSpec))
-    return df
-
-
-df_train = add_roll_and_lag_features(df_train, sensor_cols)
+scaler = StandardScaler(inputCol="features", outputCol="scaled_features")
+df_train = scaler.fit(df_train).transform(df_train)
 
 # Split data into train/test sets
 unit_ids = df_train.select("unit_id").distinct().rdd.flatMap(lambda x: x).collect()
